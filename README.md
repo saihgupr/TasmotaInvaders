@@ -1,3 +1,5 @@
+![Tasmota Invaders Poster](https://i.imgur.com/JEYSdVD.jpeg)
+
 # Tasmota Invaders
 
 "Tasmota Invaders" is a simple web-based Space Invaders style game that interacts with your Tasmota-flashed smart lights, creating an immersive gaming experience.
