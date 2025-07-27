@@ -1,0 +1,807 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tasmota Invaders</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background-color: #000;
+        }
+        canvas {
+            background-color: #000;
+            border: 2px solid #0f0;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas"></canvas>
+
+    <script src="config.js"></script>
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        canvas.width = 1000;
+        canvas.height = 700;
+
+        // Function to send commands to Tasmota devices
+        async function sendTasmotaCommand(ip, command, value) {
+            const url = `http://${ip}/cm?cmnd=${command}%20${value}`;
+            try {
+                const response = await fetch(url);
+                if (!response.ok) {
+                    console.error(`Tasmota command failed for ${ip}. URL: ${url}. Status: ${response.status} ${response.statusText}`);
+                    if (typeof tasmotaError !== 'undefined') {
+                        tasmotaError = true;
+                    }
+                    return false;
+                }
+                console.log(`Tasmota command successful for ${ip}. URL: ${url}`);
+                if (typeof tasmotaError !== 'undefined') {
+                    tasmotaError = false;
+                }
+                return true;
+            } catch (error) {
+                console.error(`Error sending command to ${ip}. URL: ${url}. Error:`, error);
+                if (typeof tasmotaError !== 'undefined') {
+                    tasmotaError = true;
+                }
+                return false;
+            }
+        }
+
+        // Light control functions based on game events
+        async function lightsGameStart() {
+            // All lights on, dim blue from config
+            for (const ip of window.ALL_LIGHT_IPS) {
+                await sendTasmotaCommand(ip, 'Fade', '0'); // Disable fade for instant changes
+                await sendTasmotaCommand(ip, 'Speed', '0'); // Set speed to 0 for instant changes
+                await sendTasmotaCommand(ip, 'Color', window.LIGHT_EFFECTS.gameStart.color);
+                await sendTasmotaCommand(ip, 'Dimmer', window.LIGHT_EFFECTS.gameStart.dimmer);
+                await sendTasmotaCommand(ip, 'Power', 'ON');
+            }
+        }
+
+        async function lightPlayerShoot() {
+            // Main light flashes white from config
+            for (const ip of window.LIGHT_EFFECTS.playerShoot.lights) {
+                await sendTasmotaCommand(ip, 'Fade', '0'); // Disable fade for instant changes
+                await sendTasmotaCommand(ip, 'Speed', '0'); // Set speed to 0 for instant changes
+                await sendTasmotaCommand(ip, 'Color', window.LIGHT_EFFECTS.playerShoot.color);
+                await sendTasmotaCommand(ip, 'Power', 'ON');
+                setTimeout(async () => {
+                    await sendTasmotaCommand(ip, 'Fade', '0'); // Disable fade for instant changes
+                await sendTasmotaCommand(ip, 'Speed', '0'); // Set speed to 0 for instant changes
+                    await sendTasmotaCommand(ip, 'Color', window.LIGHT_EFFECTS.gameStart.color); // Back to game start color
+                    await sendTasmotaCommand(ip, 'Dimmer', window.LIGHT_EFFECTS.gameStart.dimmer);
+                }, window.LIGHT_EFFECTS.playerShoot.duration);
+            }
+        }
+
+        async function lightAlienHit() {
+            // A random light flashes a random color from config
+            if (window.LIGHT_EFFECTS.alienHit.lights.length === 0) return; // No lights configured for this effect
+            const randomLightIp = window.LIGHT_EFFECTS.alienHit.lights[Math.floor(Math.random() * window.LIGHT_EFFECTS.alienHit.lights.length)];
+            const randomColor = window.LIGHT_EFFECTS.alienHit.colors[Math.floor(Math.random() * window.LIGHT_EFFECTS.alienHit.colors.length)];
+            await sendTasmotaCommand(randomLightIp, 'Transition', '0'); // Set transition to 0 for instant changes
+            await sendTasmotaCommand(randomLightIp, 'Color', randomColor);
+            await sendTasmotaCommand(randomLightIp, 'Power', 'ON');
+            setTimeout(async () => {
+                await sendTasmotaCommand(randomLightIp, 'Transition', '0'); // Set transition to 0 for instant changes
+                await sendTasmotaCommand(randomLightIp, 'Color', window.LIGHT_EFFECTS.gameStart.color); // Back to game start color
+                await sendTasmotaCommand(randomLightIp, 'Dimmer', window.LIGHT_EFFECTS.gameStart.dimmer);
+            }, window.LIGHT_EFFECTS.alienHit.duration);
+        }
+
+        async function lightsPlayerHit() {
+            // All lights flash red and turn off briefly, with pulse if configured
+            const effect = window.LIGHT_EFFECTS.playerHit;
+            if (effect.pulse) {
+                let brightness = 100;
+                let decreasing = true;
+                const pulseInterval = setInterval(async () => {
+                    if (decreasing) {
+                        brightness -= 10;
+                        if (brightness <= 0) {
+                            decreasing = false;
+                        }
+                    } else {
+                        brightness += 10;
+                        if (brightness >= 100) {
+                            decreasing = true;
+                        }
+                    }
+                    for (const ip of effect.lights) {
+                        await sendTasmotaCommand(ip, 'Fade', '0'); // Disable fade for instant changes
+                await sendTasmotaCommand(ip, 'Speed', '0'); // Set speed to 0 for instant changes
+                        await sendTasmotaCommand(ip, 'Color', effect.color);
+                        await sendTasmotaCommand(ip, 'Dimmer', brightness.toString());
+                        await sendTasmotaCommand(ip, 'Power', 'ON');
+                    }
+                }, 50); // Pulse every 50ms
+
+                setTimeout(async () => {
+                    clearInterval(pulseInterval);
+                    for (const ip of effect.lights) {
+                        await sendTasmotaCommand(ip, 'Fade', '0'); // Disable fade for instant changes
+                await sendTasmotaCommand(ip, 'Speed', '0'); // Set speed to 0 for instant changes
+                        await sendTasmotaCommand(ip, 'Power', 'OFF');
+                    }
+                }, effect.duration); // Red for duration
+                setTimeout(async () => {
+                    lightsGameStart(); // Return to game start state
+                }, effect.duration + 500); // Off for 500ms, then back on
+            } else {
+                for (const ip of effect.lights) {
+                    await sendTasmotaCommand(ip, 'Fade', '0'); // Disable fade for instant changes
+                await sendTasmotaCommand(ip, 'Speed', '0'); // Set speed to 0 for instant changes
+                    await sendTasmotaCommand(ip, 'Color', effect.color);
+                    await sendTasmotaCommand(ip, 'Power', 'ON');
+                }
+                setTimeout(async () => {
+                    for (const ip of effect.lights) {
+                        await sendTasmotaCommand(ip, 'Fade', '0'); // Disable fade for instant changes
+                await sendTasmotaCommand(ip, 'Speed', '0'); // Set speed to 0 for instant changes
+                        await sendTasmotaCommand(ip, 'Power', 'OFF');
+                    }
+                }, effect.duration);
+                setTimeout(async () => {
+                    lightsGameStart(); // Return to game start state
+                }, effect.duration + 500);
+            }
+        }
+
+        async function lightsGameOver() {
+            // All lights off from config
+            for (const ip of window.LIGHT_EFFECTS.gameOver.lights) {
+                await sendTasmotaCommand(ip, 'Fade', '0'); // Disable fade for instant changes
+                await sendTasmotaCommand(ip, 'Speed', '0'); // Set speed to 0 for instant changes
+                await sendTasmotaCommand(ip, 'Power', 'OFF');
+            }
+        }
+
+        async function lightsNewWave() {
+            // All lights cycle colors briefly from config, or use scheme
+            const effect = window.LIGHT_EFFECTS.newWave;
+            if (effect.scheme !== undefined) {
+                for (const ip of effect.lights) {
+                    await sendTasmotaCommand(ip, 'Fade', '0'); // Disable fade for instant changes
+                await sendTasmotaCommand(ip, 'Speed', '0'); // Set speed to 0 for instant changes
+                    await sendTasmotaCommand(ip, 'Scheme', effect.scheme.toString());
+                    await sendTasmotaCommand(ip, 'Power', 'ON');
+                }
+                setTimeout(() => {
+                    lightsGameStart(); // Return to game start state
+                }, effect.duration);
+            } else {
+                let colorIndex = 0;
+                const interval = setInterval(async () => {
+                    for (const ip of effect.lights) {
+                        await sendTasmotaCommand(ip, 'Fade', '0'); // Disable fade for instant changes
+                await sendTasmotaCommand(ip, 'Speed', '0'); // Set speed to 0 for instant changes
+                        await sendTasmotaCommand(ip, 'Color', effect.colors[colorIndex]);
+                        await sendTasmotaCommand(ip, 'Power', 'ON');
+                    }
+                    colorIndex = (colorIndex + 1) % effect.colors.length;
+                }, effect.cycleInterval);
+
+                setTimeout(() => {
+                    clearInterval(interval);
+                    lightsGameStart(); // Return to game start state
+                }, effect.duration);
+            }
+        }
+
+        async function lightsAtomicBomb() {
+            const effect = window.LIGHT_EFFECTS.atomicBomb;
+            for (const ip of effect.lights) {
+                await sendTasmotaCommand(ip, 'Fade', '0'); // Disable fade for instant changes
+                await sendTasmotaCommand(ip, 'Speed', '0'); // Set speed to 0 for instant changes
+                await sendTasmotaCommand(ip, 'Color', effect.color);
+                await sendTasmotaCommand(ip, 'Dimmer', effect.dimmer);
+                await sendTasmotaCommand(ip, 'Power', 'ON');
+            }
+            setTimeout(() => {
+                lightsGameStart(); // Return to game start state
+            }, effect.duration);
+        }
+
+        async function lightsSuperShield() {
+            const effect = window.LIGHT_EFFECTS.superShield;
+            let colorIndex = 0;
+            const interval = setInterval(async () => {
+                for (const ip of effect.lights) {
+                    await sendTasmotaCommand(ip, 'Fade', '0'); // Disable fade for instant changes
+                await sendTasmotaCommand(ip, 'Speed', '0'); // Set speed to 0 for instant changes
+                    await sendTasmotaCommand(ip, 'Color', effect.colors[colorIndex]);
+                    await sendTasmotaCommand(ip, 'Dimmer', effect.dimmer);
+                    await sendTasmotaCommand(ip, 'Power', 'ON');
+                }
+                colorIndex = (colorIndex + 1) % effect.colors.length;
+            }, effect.cycleInterval);
+
+            setTimeout(() => {
+                clearInterval(interval);
+                lightsGameStart(); // Return to game start state
+            }, effect.duration);
+        }
+
+        // --- Game Logic ---
+        const PLAYER_WIDTH = 50;
+        const PLAYER_HEIGHT = 30;
+        const PLAYER_SPEED = 5;
+        const BULLET_WIDTH = 5;
+        const BULLET_HEIGHT = 15;
+        const BULLET_SPEED = 7;
+        const ALIEN_WIDTH = 40;
+        const ALIEN_HEIGHT = 30;
+        const ALIEN_SPEED = 1;
+        const ALIEN_ROWS = 3;
+        const ALIENS_PER_ROW = 8;
+        const ALIEN_SPACING_X = 60;
+        const ALIEN_SPACING_Y = 50;
+        const ALIEN_BULLET_WIDTH = 8;
+        const ALIEN_BULLET_HEIGHT = 18;
+        const ALIEN_BULLET_SPEED = 4;
+        const ALIEN_SHOOT_INTERVAL = 1000; // milliseconds
+
+        const POWERUP_SIZE = 20;
+        const POWERUP_SPEED = 2;
+        const POWERUP_DROP_CHANCE = 0.2; // 20% chance
+
+        const EXPLOSION_PARTICLE_COUNT = 15;
+        const EXPLOSION_PARTICLE_SIZE = 3;
+        const EXPLOSION_PARTICLE_SPEED = 3;
+        const EXPLOSION_DURATION = 500; // milliseconds
+
+        let player = {
+            x: canvas.width / 2 - PLAYER_WIDTH / 2,
+            y: canvas.height - PLAYER_HEIGHT - 20,
+            width: PLAYER_WIDTH,
+            height: PLAYER_HEIGHT,
+            dx: 0,
+            lives: 3,
+            fireRate: 200, // milliseconds between shots
+            canMultiShot: false,
+            shielded: false,
+            superShieldActive: false, // New: Flag for super shield active
+            lastShotTime: 0
+        };
+
+        let bullets = []; // Player bullets
+        let alienBullets = []; // Alien bullets
+        let aliens = [];
+        let powerUps = [];
+        let explosions = []; // Array to store active explosions
+        let score = 0;
+        let highScore = localStorage.getItem('tasmotaInvadersHighScore') || 0; // Load high score
+        let level = 1; // New: Current game level
+        let gameOver = false;
+        let gameStarted = false; // New flag for game start
+        let gamePaused = false; // New flag for game pause
+        let lastAlienShotTime = 0;
+        let tasmotaError = false; // New flag for Tasmota errors
+
+        // Starfield background
+        const stars = [];
+        const NUM_STARS = 100;
+        for (let i = 0; i < NUM_STARS; i++) {
+            stars.push({
+                x: Math.random() * canvas.width,
+                y: Math.random() * canvas.height,
+                radius: Math.random() * 1.5,
+                alpha: Math.random()
+            });
+        }
+
+        function drawStars() {
+            stars.forEach(star => {
+                ctx.beginPath();
+                ctx.arc(star.x, star.y, star.radius, 0, Math.PI * 2);
+                ctx.fillStyle = `rgba(255, 255, 255, ${star.alpha})`;
+                ctx.fill();
+
+                star.y += 0.1; // Slowly move stars down
+                if (star.y > canvas.height) {
+                    star.y = 0; // Reset to top
+                    star.x = Math.random() * canvas.width;
+                }
+            });
+        }
+
+        function createExplosion(x, y, color) {
+            const particles = [];
+            for (let i = 0; i < EXPLOSION_PARTICLE_COUNT; i++) {
+                particles.push({
+                    x: x,
+                    y: y,
+                    size: EXPLOSION_PARTICLE_SIZE,
+                    color: color,
+                    vx: (Math.random() - 0.5) * 2 * EXPLOSION_PARTICLE_SPEED,
+                    vy: (Math.random() - 0.5) * 2 * EXPLOSION_PARTICLE_SPEED,
+                    alpha: 1,
+                    life: EXPLOSION_DURATION
+                });
+            }
+            explosions.push(particles);
+        }
+
+        function drawExplosions() {
+            explosions.forEach(explosion => {
+                explosion.forEach(particle => {
+                    ctx.fillStyle = `rgba(${parseInt(particle.color.substring(0,2), 16)}, ${parseInt(particle.color.substring(2,4), 16)}, ${parseInt(particle.color.substring(4,6), 16)}, ${particle.alpha})`;
+                    ctx.fillRect(particle.x, particle.y, particle.size, particle.size);
+                });
+            });
+        }
+
+        function updateExplosions() {
+            explosions.forEach(explosion => {
+                explosion.forEach(particle => {
+                    particle.x += particle.vx;
+                    particle.y += particle.vy;
+                    particle.life -= 16; // Assuming 60fps, roughly 16ms per frame
+                    particle.alpha = particle.life / EXPLOSION_DURATION;
+                });
+            });
+            explosions = explosions.filter(explosion => explosion[0].life > 0); // Remove dead explosions
+        }
+
+        function createAliens() {
+            aliens = [];
+            alienBullets = []; // Clear alien bullets on new wave
+            powerUps = []; // Clear power-ups on new wave
+            for (let row = 0; row < ALIEN_ROWS; row++) {
+                for (let i = 0; i < ALIENS_PER_ROW; i++) {
+                    aliens.push({
+                        x: 50 + i * ALIEN_SPACING_X,
+                        y: 50 + row * ALIEN_SPACING_Y,
+                        width: ALIEN_WIDTH,
+                        height: ALIEN_HEIGHT,
+                        dx: ALIEN_SPEED,
+                        dy: 0,
+                        type: Math.random() < 0.5 ? 1 : 2 // Assign alien type 1 or 2
+                    });
+                }
+            }
+            window.lightsNewWave();
+        }
+
+        let currentHue = 0; // For rainbow player
+
+        function drawPlayer() {
+            if (player.superShieldActive) {
+                currentHue = (currentHue + 5) % 360; // Cycle hue
+                ctx.fillStyle = `hsl(${currentHue}, 100%, 50%)`;
+            } else {
+                ctx.fillStyle = player.shielded ? 'blue' : 'lime';
+            }
+            // Simple pixel art player ship
+            ctx.fillRect(player.x + 10, player.y, player.width - 20, player.height / 3); // Top part
+            ctx.fillRect(player.x, player.y + player.height / 3, player.width, player.height / 3); // Middle part
+            ctx.fillRect(player.x + 10, player.y + (player.height * 2) / 3, player.width - 20, player.height / 3); // Bottom part
+            ctx.fillStyle = 'cyan'; // Cockpit
+            ctx.fillRect(player.x + player.width / 2 - 5, player.y + 5, 10, 10);
+        }
+
+        function drawBullets() {
+            ctx.fillStyle = 'yellow';
+            bullets.forEach(bullet => {
+                ctx.fillRect(bullet.x, bullet.y, bullet.width, bullet.height);
+            });
+        }
+
+        function drawAlienBullets() {
+            ctx.fillStyle = 'orange';
+            alienBullets.forEach(bullet => {
+                ctx.fillRect(bullet.x, bullet.y, bullet.width, bullet.height);
+            });
+        }
+
+        function drawAlienType1(alien) {
+            ctx.fillStyle = 'red';
+            // Simple pixel art alien type 1
+            ctx.fillRect(alien.x + 5, alien.y, alien.width - 10, alien.height / 3); // Head
+            ctx.fillRect(alien.x, alien.y + alien.height / 3, alien.width, alien.height / 3); // Body
+            ctx.fillRect(alien.x + 5, alien.y + (alien.height * 2) / 3, alien.width - 10, alien.height / 3); // Legs
+            ctx.fillStyle = 'purple'; // Eyes
+            ctx.fillRect(alien.x + 10, alien.y + 10, 5, 5);
+            ctx.fillRect(alien.x + alien.width - 15, alien.y + 10, 5, 5);
+        }
+
+        function drawAlienType2(alien) {
+            ctx.fillStyle = 'green';
+            // Simple pixel art alien type 2 (different shape)
+            ctx.fillRect(alien.x, alien.y + 10, alien.width, alien.height - 20); // Body
+            ctx.fillRect(alien.x + 10, alien.y, alien.width - 20, 10); // Top antenna
+            ctx.fillRect(alien.x + 10, alien.y + alien.height - 10, alien.width - 20, 10); // Bottom legs
+            ctx.fillStyle = 'yellow'; // Eye
+            ctx.beginPath();
+            ctx.arc(alien.x + alien.width / 2, alien.y + alien.height / 2, 5, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        function drawAliens() {
+            aliens.forEach(alien => {
+                if (alien.type === 1) {
+                    drawAlienType1(alien);
+                } else {
+                    drawAlienType2(alien);
+                }
+            });
+        }
+
+        function drawPowerUps() {
+            powerUps.forEach(powerUp => {
+                ctx.fillStyle = powerUp.color;
+                ctx.fillRect(powerUp.x, powerUp.y, powerUp.size, powerUp.size);
+                ctx.fillStyle = 'black';
+                ctx.font = '12px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText(powerUp.type.charAt(0).toUpperCase(), powerUp.x + powerUp.size / 2, powerUp.y + powerUp.size / 2 + 4);
+            });
+        }
+
+        function drawScore() {
+            ctx.fillStyle = 'white';
+            ctx.font = '24px "Press Start 2P", cursive'; // Using a pixel font
+            ctx.textAlign = 'left';
+            ctx.fillText(`SCORE: ${score}`, 10, 30);
+            ctx.fillText(`LEVEL: ${level}`, 10, 55);
+        }
+
+        function drawLives() {
+            ctx.fillStyle = 'white';
+            ctx.font = '18px "Press Start 2P", cursive';
+            ctx.textAlign = 'right';
+            ctx.fillText(`LIVES: ${player.lives}`, canvas.width - 10, 30);
+        }
+
+        function drawTasmotaError() {
+            // Removed exclamation mark
+        }
+
+        function update() {
+            if (gameOver || gamePaused) return;
+
+            // Move player
+            player.x += player.dx;
+
+            // Keep player on screen
+            if (player.x < 0) player.x = 0;
+            if (player.x + player.width > canvas.width) player.x = canvas.width - player.width;
+
+            // Move player bullets
+            bullets = bullets.filter(bullet => bullet.y > 0);
+            bullets.forEach(bullet => {
+                bullet.y -= BULLET_SPEED;
+            });
+
+            // Move aliens
+            let hitWall = false;
+            aliens.forEach(alien => {
+                alien.x += alien.dx;
+                if (alien.x + alien.width > canvas.width || alien.x < 0) {
+                    hitWall = true;
+                }
+            });
+
+            if (hitWall) {
+                aliens.forEach(alien => {
+                    alien.dx *= -1;
+                    alien.y += ALIEN_HEIGHT / 2;
+                });
+            }
+
+            // Alien shooting
+            const currentTime = Date.now();
+            if (currentTime - lastAlienShotTime > ALIEN_SHOOT_INTERVAL && aliens.length > 0) {
+                const shootingAlien = aliens[Math.floor(Math.random() * aliens.length)];
+                alienBullets.push({
+                    x: shootingAlien.x + shootingAlien.width / 2 - ALIEN_BULLET_WIDTH / 2,
+                    y: shootingAlien.y + shootingAlien.height,
+                    width: ALIEN_BULLET_WIDTH,
+                    height: ALIEN_BULLET_HEIGHT
+                });
+                lastAlienShotTime = currentTime;
+            }
+
+            // Move alien bullets
+            alienBullets = alienBullets.filter(bullet => bullet.y < canvas.height);
+            alienBullets.forEach(bullet => {
+                bullet.y += ALIEN_BULLET_SPEED;
+            });
+
+            // Move power-ups
+            powerUps = powerUps.filter(powerUp => powerUp.y < canvas.height);
+            powerUps.forEach(powerUp => {
+                powerUp.y += POWERUP_SPEED;
+            });
+
+            // Update explosions
+            updateExplosions();
+
+            // Player bullet-alien collision detection
+            bullets.forEach((playerBullet, playerBulletIndex) => {
+                aliens.forEach((alien, alienIndex) => {
+                    if (
+                        playerBullet.x < alien.x + alien.width &&
+                        playerBullet.x + playerBullet.width > alien.x &&
+                        playerBullet.y < alien.y + alien.height &&
+                        playerBullet.y + playerBullet.height > alien.y
+                    ) {
+                        // Collision
+                        bullets.splice(playerBulletIndex, 1);
+                        aliens.splice(alienIndex, 1);
+                        score += 10;
+                        window.lightAlienHit();
+                        createExplosion(alien.x + alien.width / 2, alien.y + alien.height / 2, 'FF0000'); // Red explosion
+
+                        // Drop power-up chance
+                        if (Math.random() < POWERUP_DROP_CHANCE) {
+                            const powerUpTypes = ['fireRate', 'multiShot', 'shield', 'life', 'atomicBomb', 'superShield'];
+                            const randomType = powerUpTypes[Math.floor(Math.random() * powerUpTypes.length)];
+                            let color;
+                            switch(randomType) {
+                                case 'fireRate': color = 'purple'; break;
+                                case 'multiShot': color = 'orange'; break;
+                                case 'shield': color = 'blue'; break;
+                                case 'life': color = 'green'; break;
+                                case 'atomicBomb': color = 'red'; break;
+                                case 'superShield': color = 'cyan'; break;
+                            }
+                            powerUps.push({
+                                x: alien.x + alien.width / 2 - POWERUP_SIZE / 2,
+                                y: alien.y,
+                                size: POWERUP_SIZE,
+                                type: randomType,
+                                color: color
+                            });
+                        }
+                    }
+                });
+            });
+
+            // Alien bullet-player collision detection
+            alienBullets.forEach((alienBullet, alienBulletIndex) => {
+                if (
+                    alienBullet.x < player.x + player.width &&
+                    alienBullet.x + alienBullet.width > player.x &&
+                    alienBullet.y < player.y + player.height &&
+                    alienBullet.y + alienBullet.height > player.y
+                ) {
+                    // Collision
+                    alienBullets.splice(alienBulletIndex, 1);
+                    if (!player.shielded) {
+                        player.lives--;
+                        window.lightsPlayerHit();
+                        createExplosion(player.x + player.width / 2, player.y + player.height / 2, 'FF0000'); // Red explosion
+                    } else {
+                        player.shielded = false; // Shield absorbs one hit
+                        createExplosion(player.x + player.width / 2, player.y + player.height / 2, '0000FF'); // Blue explosion for shield hit
+                    }
+
+                    if (player.lives <= 0) {
+                        gameOver = true;
+                        lightsGameOver();
+                        if (score > highScore) {
+                            highScore = score;
+                            localStorage.setItem('tasmotaInvadersHighScore', highScore);
+                        }
+
+                    }
+                }
+            });
+
+            // Power-up - player collision detection
+            powerUps.forEach((powerUp, powerUpIndex) => {
+                if (
+                    powerUp.x < player.x + player.width &&
+                    powerUp.x + powerUp.size > player.x &&
+                    powerUp.y < player.y + player.height &&
+                    powerUp.y + powerUp.size > player.y
+                ) {
+                    // Collision
+                    powerUps.splice(powerUpIndex, 1);
+                    switch(powerUp.type) {
+                        case 'fireRate':
+                            player.fireRate = Math.max(50, player.fireRate - 50); // Increase fire rate
+                            break;
+                        case 'multiShot':
+                            player.canMultiShot = true;
+                            break;
+                        case 'shield':
+                            player.shielded = true;
+                            break;
+                        case 'life':
+                            player.lives++;
+                            break;
+                        case 'atomicBomb':
+                            aliens = []; // Clear all aliens
+                            alienBullets = []; // Clear all alien bullets
+                            window.lightsAtomicBomb();
+                            break;
+                        case 'superShield':
+                            player.shielded = true;
+                            player.superShieldActive = true; // Activate rainbow player
+                            window.lightsSuperShield();
+                            setTimeout(() => {
+                                player.shielded = false;
+                                player.superShieldActive = false; // Deactivate rainbow player
+                                window.lightsGameStart(); // Return to game start state after super shield wears off
+                            }, 10000); // 10 seconds
+                            break;
+                        case 'superShield':
+                            player.shielded = true;
+                            window.lightsSuperShield();
+                            setTimeout(() => {
+                                player.shielded = false;
+                                window.lightsGameStart(); // Return to game start state after super shield wears off
+                            }, 10000); // 10 seconds
+                            break;
+                    }
+                }
+            });
+
+            // Alien-player collision or aliens reach bottom
+            aliens.forEach(alien => {
+                if (
+                    alien.x < player.x + player.width &&
+                    alien.x + alien.width > player.x &&
+                    alien.y + alien.height > player.y
+                ) {
+                    player.lives--;
+                    lightsPlayerHit();
+                    createExplosion(alien.x + alien.width / 2, alien.y + alien.height / 2, 'FF0000'); // Red explosion
+                    createAliens(); // Reset aliens after hit
+                    if (player.lives <= 0) {
+                        gameOver = true;
+                        lightsGameOver();
+                        if (score > highScore) {
+                            highScore = score;
+                            localStorage.setItem('tasmotaInvadersHighScore', highScore);
+                        }
+
+                    }
+                }
+            });
+
+            // Check if all aliens are destroyed
+            if (aliens.length === 0) {
+                score += 100; // Bonus for clearing wave
+                level++; // Increment level
+                if (level % 5 === 0) { // Every 5 levels, trigger atomic bomb effect
+                    window.lightsAtomicBomb();
+                }
+                createAliens();
+            }
+        }
+
+        function gameLoop() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            drawStars(); // Draw stars first
+
+            if (!gameStarted) {
+                // Start Screen
+                ctx.fillStyle = 'white';
+                ctx.font = '50px "Press Start 2P", cursive';
+                ctx.textAlign = 'center';
+                ctx.fillText('TASMOTA INVADERS', canvas.width / 2, canvas.height / 2 - 50);
+                ctx.font = '30px "Press Start 2P", cursive';
+                ctx.textAlign = 'center';
+                ctx.fillText('PRESS SPACE TO START', canvas.width / 2, canvas.height / 2 + 20);
+            } else if (gamePaused) {
+                // Pause Screen
+                ctx.fillStyle = 'white';
+                ctx.font = '50px "Press Start 2P", cursive';
+                ctx.textAlign = 'center';
+                ctx.fillText('PAUSED', canvas.width / 2, canvas.height / 2);
+            } else if (!gameOver) {
+                update();
+                drawPlayer();
+                drawBullets();
+                drawAlienBullets(); // Draw alien bullets
+                drawAliens();
+                drawPowerUps(); // Draw power-ups
+                drawExplosions(); // Draw explosions
+                drawScore();
+                drawLives();
+                drawTasmotaError(); // Draw Tasmota error indicator
+            } else {
+                ctx.fillStyle = 'white';
+                ctx.font = '50px "Press Start 2P", cursive';
+                ctx.textAlign = 'center';
+                ctx.fillText('GAME OVER', canvas.width / 2, canvas.height / 2 - 30);
+                ctx.font = '30px "Press Start 2P", cursive';
+                ctx.fillText(`SCORE: ${score}`, canvas.width / 2, canvas.height / 2 + 20);
+                ctx.fillText(`HIGH SCORE: ${highScore}`, canvas.width / 2, canvas.height / 2 + 70); // Display high score on game over screen
+                ctx.fillText('PRESS R TO RESTART', canvas.width / 2, canvas.height / 2 + 120);
+            }
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        // Event Listeners
+        document.addEventListener('keydown', e => {
+            if (e.key === ' ' && !gameStarted) {
+                gameStarted = true;
+                createAliens(); // Initialize aliens when game starts
+                window.lightsGameStart(); // Initialize lights when game starts
+                return;
+            }
+
+            if (gameOver && e.key === 'r') {
+                // Restart game
+                player.lives = 3;
+                score = 0;
+                level = 1; // Reset level on game restart
+                gameOver = false;
+                player.fireRate = 200; // Reset fire rate
+                player.canMultiShot = false; // Reset multi-shot
+                player.shielded = false; // Reset shield
+                createAliens();
+                window.lightsGameStart();
+                return;
+            }
+
+            if (gameStarted && !gameOver) {
+                if (e.key === 'p' || e.key === 'P') {
+                    gamePaused = !gamePaused;
+                    return;
+                }
+
+                if (!gamePaused) {
+                    if (e.key === 'ArrowLeft' || e.key === 'a') {
+                        player.dx = -PLAYER_SPEED;
+                    } else if (e.key === 'ArrowRight' || e.key === 'd') {
+                        player.dx = PLAYER_SPEED;
+                    } else if (e.key === ' ') { // Spacebar to shoot
+                        const currentTime = Date.now();
+                        if (currentTime - player.lastShotTime > player.fireRate) {
+                            bullets.push({
+                                x: player.x + player.width / 2 - BULLET_WIDTH / 2,
+                                y: player.y,
+                                width: BULLET_WIDTH,
+                                height: BULLET_HEIGHT
+                            });
+                            if (player.canMultiShot) {
+                                bullets.push({
+                                    x: player.x + player.width / 4 - BULLET_WIDTH / 2,
+                                    y: player.y,
+                                    width: BULLET_WIDTH,
+                                    height: BULLET_HEIGHT
+                                });
+                                bullets.push({
+                                    x: player.x + (player.width * 3) / 4 - BULLET_WIDTH / 2,
+                                    y: player.y,
+                                    width: BULLET_WIDTH,
+                                    height: BULLET_HEIGHT
+                                });
+                            }
+                            window.lightPlayerShoot();
+                            player.lastShotTime = currentTime;
+                        }
+                    }
+                }
+            }
+        });
+
+        document.addEventListener('keyup', e => {
+            if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'ArrowRight' || e.key === 'd') {
+                player.dx = 0;
+            }
+        });
+
+        // Initial call to start the game loop (will show start screen)
+        gameLoop();
+
+    </script>
+</body>
+</html>
