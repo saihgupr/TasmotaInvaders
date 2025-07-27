@@ -9,7 +9,7 @@
 *   **Interactive Lighting:** Game events trigger real-time light changes in your room.
 *   **Simple Setup:** Easy to run in any modern web browser.
 
-<video src="https://i.imgur.com/cLYifM7.mp4" controls muted loop autoplay></video>
+https://github.com/user-attachments/assets/561f7e19-8193-44be-9e4c-1e1c5888f83f
 
 ## Setup and Configuration
 
