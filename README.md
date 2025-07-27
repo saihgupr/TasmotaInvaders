@@ -1,4 +1,4 @@
-![Tasmota Invaders Poster](https://i.imgur.com/JEYSdVD.jpeg)
+![Tasmota Invaders Poster](https://i.imgur.com/iDFyyO1.png)
 
 # Tasmota Invaders
 
