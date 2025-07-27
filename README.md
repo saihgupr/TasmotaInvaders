@@ -9,6 +9,8 @@
 *   **Interactive Lighting:** Game events trigger real-time light changes in your room.
 *   **Simple Setup:** Easy to run in any modern web browser.
 
+<video src="https://i.imgur.com/cLYifM7.mp4" controls muted loop autoplay></video>
+
 ## Setup and Configuration
 
 To get started with Tasmota Invaders, follow these steps:
